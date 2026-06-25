@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.zip
+*.tar.gz
+.DS_Store
+Thumbs.db
+nca_out/
+results_checkpoint.csv
+failed.csv

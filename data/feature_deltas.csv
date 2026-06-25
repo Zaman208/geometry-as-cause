@@ -1,0 +1,7 @@
+intervention,n,spearman_rho,p_value,mean_delta_alpha,mean_delta_feature
+label_noise_10,94,-0.612,0.0,-0.22472,0.12398
+feature_noise_03,95,-0.2525,0.013545,-0.02268,0.03983
+feature_noise_07,91,-0.3532,0.000595,-0.10323,0.16981
+smote_balance,90,0.1439,0.176021,0.06112,0.13945
+class_imbalance,87,0.2142,0.046312,-0.09846,-0.32063
+label_noise_20,94,-0.6903,0.0,-0.26795,0.22672
