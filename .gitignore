@@ -9,3 +9,14 @@ Thumbs.db
 nca_out/
 results_checkpoint.csv
 failed.csv
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+env/
+venv/
+*.log
+nca_out/
+*_checkpoint.csv
+.pytest_cache/

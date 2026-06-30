@@ -1,23 +1,9 @@
 #!/usr/bin/env python3
 """
-nca_causal_intervention
-
-Interventions & Hypotheses
---------------------------
-  label_noise_10   : flip 10% labels  -> alpha DOWN  (label_noise UP)
-  label_noise_20   : flip 20% labels  -> alpha DOWN  (label_noise UP more)
-  feature_noise_03 : Gauss noise s=.3 -> alpha DOWN  (probe_difficulty UP)
-  feature_noise_07 : Gauss noise s=.7 -> alpha DOWN  (probe_difficulty UP more)
-  smote_balance    : SMOTE rebalance  -> alpha UP    (class_entropy UP)
-  class_imbalance  : subsample minority 10x -> alpha DOWN (class_entropy DOWN)
-
-Statistical Validation (per intervention)
-------------------------------------------
-  - Paired Wilcoxon signed-rank test  (H0: median(Δα)=0)
-  - Sign accuracy  (fraction of datasets with Δα in predicted direction)
-  - Spearman rho(ΔFeature, Δα)  -- causal dose-response signal
-  - Bootstrap 95% CI on mean Δα  (1000 iterations)
-  - Cohen's d effect size
+Causal intervention experiment for the Δ-metric framework. Applies four
+controlled interventions (label noise, feature noise, SMOTE balancing, class
+imbalance) to 94 OpenML datasets and measures the effect on the scaling
+exponent α.
 """
 
 import os, json, time, warnings
@@ -42,7 +28,7 @@ except ImportError:
     print("WARNING: imblearn not available, smote_balance will be skipped")
 
 # -- Output dir ----------------------------------------------------------------
-OUT = "/kaggle/working/causal_out" if os.path.exists("/kaggle") else "./causal_out"
+OUT = "./causal_out"
 os.makedirs(OUT, exist_ok=True)
 
 # -- Reproducibility -----------------------------------------------------------
@@ -138,7 +124,6 @@ DATASETS = {
     "spect":                          336,
     "dna":                            40670,
     "musk1":                          1116,
-    "kr-vs-kp":                       3,
     "chess-krvkp":                    3,
     "monks-2":                        334,
     "tic-tac-toe":                    50,
@@ -183,8 +168,9 @@ for k, v in DATASETS.items():
         _seen.add(v); _deduped[k] = v
 DATASETS = _deduped
 
+
 # -- Preprocessing -------------------------------------------------------------
-def preprocess(X_raw, y_raw, max_samples=5000, max_features=60):
+def preprocess_dataset(X_raw, y_raw, max_samples=5000, max_features=60):
     """Standard preprocessing: encode, impute, scale, cap size."""
     df = X_raw.copy()
     for col in df.select_dtypes(include=["object", "category"]).columns:
@@ -225,7 +211,7 @@ def preprocess(X_raw, y_raw, max_samples=5000, max_features=60):
 
 
 # -- Feature extraction --------------------------------------------------------
-def extract_features(X, y):
+def extract_geometric_features(X, y):
     """Extract the features predictive of alpha (from IEEE paper)."""
     feats = {}
     n, d = X.shape
@@ -283,7 +269,7 @@ def extract_features(X, y):
 
 
 # -- Alpha estimation ----------------------------------------------------------
-def estimate_alpha(X, y, verbose=False):
+def fit_power_law_exponent(X, y, verbose=False):
     """
     Estimate scaling exponent alpha from MLP learning curves.
     Returns (alpha, r2, ci_low, ci_high) or (nan, nan, nan, nan) if failed.
@@ -399,7 +385,7 @@ def estimate_alpha(X, y, verbose=False):
 
 
 # -- Intervention functions ----------------------------------------------------
-def iv_label_noise(X, y, rate, seed=42):
+def apply_label_noise_intervention(X, y, rate, seed=42):
     """Flip `rate` fraction of labels to a random different class."""
     rng = np.random.default_rng(seed)
     classes = np.unique(y)
@@ -413,7 +399,7 @@ def iv_label_noise(X, y, rate, seed=42):
     return X.copy(), y_new
 
 
-def iv_feature_noise(X, y, sigma_scale, seed=42):
+def apply_feature_noise_intervention(X, y, sigma_scale, seed=42):
     """Add Gaussian noise N(0, sigma_scale * feature_std) to each feature."""
     rng = np.random.default_rng(seed)
     stds = X.std(axis=0) + 1e-8
@@ -421,7 +407,7 @@ def iv_feature_noise(X, y, sigma_scale, seed=42):
     return (X + noise).astype(np.float32), y.copy()
 
 
-def iv_smote_balance(X, y, seed=42):
+def apply_smote_balancing(X, y, seed=42):
     """SMOTE oversample to fully balance all classes."""
     if not HAS_SMOTE:
         return None, None
@@ -438,7 +424,7 @@ def iv_smote_balance(X, y, seed=42):
         return None, None
 
 
-def iv_class_imbalance(X, y, imbalance_factor=10, seed=42):
+def apply_class_imbalance_intervention(X, y, imbalance_factor=10, seed=42):
     """
     Subsample minority classes to 1/imbalance_factor of majority size.
     Creates severe class imbalance, reducing class entropy.
@@ -471,7 +457,7 @@ def iv_class_imbalance(X, y, imbalance_factor=10, seed=42):
 
 
 # -- Statistical analysis helpers ----------------------------------------------
-def cohens_d(a, b=None):
+def compute_cohens_d(a, b=None):
     """Cohen's d for paired differences (a = Δα array) or two-sample."""
     if b is None:
         # one-sample vs 0
@@ -480,7 +466,7 @@ def cohens_d(a, b=None):
     return float((np.mean(a) - np.mean(b)) / (pooled_std + 1e-10))
 
 
-def bootstrap_mean_ci(arr, n_boot=1000, seed=42):
+def compute_bootstrap_confidence_interval(arr, n_boot=1000, seed=42):
     """Bootstrap 95% CI for mean of arr."""
     rng = np.random.default_rng(seed)
     arr = np.array(arr)
@@ -491,8 +477,8 @@ def bootstrap_mean_ci(arr, n_boot=1000, seed=42):
     return float(np.percentile(boot, 2.5)), float(np.percentile(boot, 97.5))
 
 
-def run_statistical_tests(delta_alpha, delta_feature, predicted_direction,
-                          intervention_name):
+def run_intervention_statistics(delta_alpha, delta_feature, predicted_direction,
+                                intervention_name):
     """
     Full statistical battery for one intervention.
 
@@ -558,12 +544,12 @@ def run_statistical_tests(delta_alpha, delta_feature, predicted_direction,
         result["spearman_p"]                 = np.nan
 
     # 6. Bootstrap 95% CI on mean Δα
-    ci_lo, ci_hi = bootstrap_mean_ci(da, n_boot=BOOTSTRAP_N)
+    ci_lo, ci_hi = compute_bootstrap_confidence_interval(da, n_boot=BOOTSTRAP_N)
     result["bootstrap_ci_low"]  = ci_lo
     result["bootstrap_ci_high"] = ci_hi
 
     # 7. Cohen's d (effect size)
-    result["cohens_d"] = cohens_d(da)
+    result["cohens_d"] = compute_cohens_d(da)
 
     # 8. Summary verdict
     p_threshold = 0.05
@@ -579,16 +565,16 @@ def run_statistical_tests(delta_alpha, delta_feature, predicted_direction,
 # -- Main experiment -----------------------------------------------------------
 INTERVENTIONS = [
     # (name, function, kwargs, predicted_direction, tracking_feature)
-    ("label_noise_10",   iv_label_noise,     {"rate": 0.10}, -1, "label_noise"),
-    ("label_noise_20",   iv_label_noise,     {"rate": 0.20}, -1, "label_noise"),
-    ("feature_noise_03", iv_feature_noise,   {"sigma_scale": 0.30}, -1, "probe_difficulty"),
-    ("feature_noise_07", iv_feature_noise,   {"sigma_scale": 0.70}, -1, "probe_difficulty"),
-    ("smote_balance",    iv_smote_balance,   {}, +1, "class_entropy"),
-    ("class_imbalance",  iv_class_imbalance, {"imbalance_factor": 10}, -1, "class_entropy"),
+    ("label_noise_10",   apply_label_noise_intervention,      {"rate": 0.10}, -1, "label_noise"),
+    ("label_noise_20",   apply_label_noise_intervention,      {"rate": 0.20}, -1, "label_noise"),
+    ("feature_noise_03", apply_feature_noise_intervention,    {"sigma_scale": 0.30}, -1, "probe_difficulty"),
+    ("feature_noise_07", apply_feature_noise_intervention,    {"sigma_scale": 0.70}, -1, "probe_difficulty"),
+    ("smote_balance",    apply_smote_balancing,               {}, +1, "class_entropy"),
+    ("class_imbalance",  apply_class_imbalance_intervention,  {"imbalance_factor": 10}, -1, "class_entropy"),
 ]
 
 
-def run_experiment():
+def run_causal_intervention_experiment():
     rows         = []   # per-dataset × intervention
     stat_inputs  = {iv[0]: {"delta_alpha": [], "delta_feature": [],
                              "direction": iv[3], "feature_key": iv[4]}
@@ -627,7 +613,7 @@ def run_experiment():
             continue
 
         # -- Preprocess --------------------------------------------------------
-        X, y = preprocess(X_raw, y_raw)
+        X, y = preprocess_dataset(X_raw, y_raw)
         if X is None or len(np.unique(y)) < 2 or len(y) < 100:
             print("  skip: preprocess failed")
             continue
@@ -635,14 +621,14 @@ def run_experiment():
         print(f"  shape={X.shape}  classes={len(np.unique(y))}")
 
         # -- Baseline alpha ----------------------------------------------------
-        alpha_orig, r2_orig, ci_lo_orig, ci_hi_orig = estimate_alpha(X, y, verbose=True)
+        alpha_orig, r2_orig, ci_lo_orig, ci_hi_orig = fit_power_law_exponent(X, y, verbose=True)
         if not np.isfinite(alpha_orig):
             print("  skip: baseline alpha failed")
             continue
         accepted_baseline += 1
 
         # -- Baseline features -------------------------------------------------
-        feats_orig = extract_features(X, y)
+        feats_orig = extract_geometric_features(X, y)
 
         # -- Run each intervention ---------------------------------------------
         for iv_name, iv_fn, iv_kwargs, direction, track_feat in INTERVENTIONS:
@@ -659,12 +645,12 @@ def run_experiment():
                 continue
 
             # Estimate modified alpha
-            alpha_mod, r2_mod, ci_lo_mod, ci_hi_mod = estimate_alpha(X_mod, y_mod)
+            alpha_mod, r2_mod, ci_lo_mod, ci_hi_mod = fit_power_law_exponent(X_mod, y_mod)
             if not np.isfinite(alpha_mod):
                 continue
 
             # Extract modified features
-            feats_mod = extract_features(X_mod, y_mod)
+            feats_mod = extract_geometric_features(X_mod, y_mod)
 
             # Compute deltas
             delta_alpha   = alpha_mod - alpha_orig
@@ -720,7 +706,7 @@ def run_experiment():
 
     test_rows = []
     for iv_name, data in stat_inputs.items():
-        result = run_statistical_tests(
+        result = run_intervention_statistics(
             delta_alpha=data["delta_alpha"],
             delta_feature=data["delta_feature"],
             predicted_direction=data["direction"],
@@ -813,7 +799,7 @@ def run_experiment():
     return df_results, df_tests
 
 
-# -- Entry point (runs directly as Kaggle notebook cell) ---------------------
+# -- Entry point ---------------------------------------------------------------
 try:
     import imblearn
     HAS_SMOTE = True
@@ -824,4 +810,4 @@ except ImportError:
     from imblearn.over_sampling import SMOTE
     HAS_SMOTE = True
 
-df_results, df_tests = run_experiment()
+df_results, df_tests = run_causal_intervention_experiment()

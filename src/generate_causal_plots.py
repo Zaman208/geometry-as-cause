@@ -1,3 +1,8 @@
+"""
+Figure generation for causal intervention analysis (Figures 5–7 and Appendix).
+Reads pre-computed intervention results from the data/ directory.
+"""
+
 import os, zipfile, warnings
 import numpy as np
 import pandas as pd
@@ -87,7 +92,7 @@ IV_LABELS = {
 }
 
 # Load data
-def load():
+def load_causal_results():
     if not all(os.path.exists(p) for p in [RESULTS_CSV, TESTS_CSV, DELTAS_CSV]):
         raise FileNotFoundError(
             "CSVs not found in /content/. "
@@ -113,12 +118,12 @@ def load():
     print(f"Loaded: {len(df_r)} rows across {df_t['intervention'].nunique()} interventions")
     return df_r, df_t, df_d
 
-df_results, df_tests, df_deltas = load()
+df_results, df_tests, df_deltas = load_causal_results()
 
 # Save helper
 SAVED = []
 
-def save(fig, stem):
+def save_figure(fig, stem):
     for ext in ("pdf", "png"):
         p = os.path.join(OUT_DIR, f"{stem}.{ext}")
         fig.savefig(p, dpi=600, bbox_inches="tight", facecolor="white")
@@ -128,7 +133,7 @@ def save(fig, stem):
 
 
 # Causal Summary: mean Delta-alpha with CIs and annotation
-def fig12_causal_summary():
+def plot_causal_summary():
     df = df_tests.copy()
     n  = len(df)
     y  = np.arange(n)
@@ -183,11 +188,11 @@ def fig12_causal_summary():
         max(df["bootstrap_ci_high"].max() + 0.30, 0.30),
     )
     fig.tight_layout()
-    save(fig, "fig5_causal_summary")
+    save_figure(fig, "fig5_causal_summary")
 
 
 # Dose-Response: paired scatter confirming monotone dose effect
-def fig13_dose_response():
+def plot_dose_response_curve():
     pairs = [
         ("label_noise_10", "label_noise_20",
          "Label Noise 10%", "Label Noise 20%",
@@ -245,11 +250,11 @@ def fig13_dose_response():
         fontsize=14, fontweight="bold", y=1.02,
     )
     fig.tight_layout()
-    save(fig, "fig7_dose_response")
+    save_figure(fig, "fig7_dose_response")
 
 
 # Regularization Paradox: low-alpha reversal under feature noise
-def fig14_regularization_paradox():
+def plot_regularization_paradox():
     fn = (df_results[df_results["intervention"] == "feature_noise_07"]
           .dropna(subset=["alpha_orig", "delta_alpha"])
           .copy())
@@ -310,11 +315,11 @@ def fig14_regularization_paradox():
     )
     ax.legend(fontsize=10, framealpha=0.95, edgecolor="#cccccc", loc="lower right")
     fig.tight_layout()
-    save(fig, "figA1_regularization_paradox")
+    save_figure(fig, "figA1_regularization_paradox")
 
 
 # Two-panel causal summary: sign accuracy + Spearman rho
-def fig15_causal_panel():
+def plot_full_causal_panel():
     df = df_tests.copy()
     y  = np.arange(len(df))
     colors = df["color"].values
@@ -322,7 +327,7 @@ def fig15_causal_panel():
     fig, axes = plt.subplots(1, 2, figsize=(15, 6.5),
                              gridspec_kw={"wspace": 0.05})
 
-    # Left: sign accuracy 
+    # Left: sign accuracy
     ax1 = axes[0]
     ax1.barh(y, df["sign_accuracy"].values, color=colors,
              height=0.58, edgecolor="white", linewidth=0.5, zorder=3)
@@ -343,7 +348,7 @@ def fig15_causal_panel():
                  color=row["color"])
     ax1.legend(fontsize=10, framealpha=0.95, edgecolor="#cccccc", loc="lower right")
 
-    # Right: Spearman rho dose-response 
+    # Right: Spearman rho dose-response
     ax2 = axes[1]
     rho_vals = df["spearman_rho"].values.astype(float)
     ax2.barh(y, rho_vals, color=colors,
@@ -382,11 +387,11 @@ def fig15_causal_panel():
         fontsize=14, fontweight="bold", y=1.02,
     )
     fig.tight_layout()
-    save(fig, "figA2_causal_panel")
+    save_figure(fig, "figA2_causal_panel")
 
 
 #  Violin + Boxplot: full distribution per intervention
-def fig16_distribution():
+def plot_alpha_regime_distributions():
     df = df_results.copy()
     df = df.dropna(subset=["delta_alpha"])
 
@@ -473,15 +478,15 @@ def fig16_distribution():
               framealpha=0.95, edgecolor="#cccccc")
 
     fig.tight_layout()
-    save(fig, "fig6_distribution")
+    save_figure(fig, "fig6_distribution")
 
 
 # Before vs After + Feature-Delta scatter
 
-def fig17_before_after():
+def plot_before_after_intervention():
     fig, axes = plt.subplots(1, 2, figsize=(14, 6.5))
 
-    #  before vs after for label_noise_20 
+    #  before vs after for label_noise_20
     ax1  = axes[0]
     ln20 = (df_results[df_results["intervention"] == "label_noise_20"]
             .dropna(subset=["alpha_orig", "alpha_mod"])
@@ -592,12 +597,12 @@ def fig17_before_after():
         fontsize=14, fontweight="bold", y=1.02,
     )
     fig.tight_layout()
-    save(fig, "figA3_before_after")
+    save_figure(fig, "figA3_before_after")
 
 
 # Generate all + ZIP
 
-def make_zip():
+def package_figures():
     with zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in SAVED:
             zf.write(p, arcname=os.path.relpath(p, CONTENT))
@@ -605,13 +610,13 @@ def make_zip():
 
 if __name__ == "__main__":
     print("\nGenerating causal figures (Fig 5-7 + appendix)...\n")
-    fig12_causal_summary()           # -> fig5_causal_summary
-    fig16_distribution()             # -> fig6_distribution
-    fig13_dose_response()            # -> fig7_dose_response
-    fig14_regularization_paradox()   # -> figA1 (appendix)
-    fig15_causal_panel()             # -> figA2 (appendix)
-    fig17_before_after()             # -> figA3 (appendix)
-    make_zip()
+    plot_causal_summary()              # -> fig5_causal_summary
+    plot_alpha_regime_distributions()  # -> fig6_distribution
+    plot_dose_response_curve()         # -> fig7_dose_response
+    plot_regularization_paradox()      # -> figA1 (appendix)
+    plot_full_causal_panel()           # -> figA2 (appendix)
+    plot_before_after_intervention()   # -> figA3 (appendix)
+    package_figures()
     print(f"\nAll done! {len(SAVED)} files saved.")
     print("Download in Colab:")
     print("  from google.colab import files")

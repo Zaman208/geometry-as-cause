@@ -1,3 +1,8 @@
+"""
+Figure generation for main paper results (Figures 1–4). Reads pre-computed
+results from data/results.csv and produces publication-quality plots.
+"""
+
 import argparse, os, zipfile, warnings
 import numpy as np
 import pandas as pd
@@ -52,12 +57,12 @@ REGIME_COLORS = {
 }
 
 # -- Load data -----------------------------------------------------------------
-def find_csv(arg):
+def resolve_data_path(arg):
     if arg and os.path.exists(arg):
         return arg
     # Try all common filenames (Colab sometimes appends " (2)" on re-upload)
     names = ["results.csv", "results (2).csv", "results(2).csv"]
-    dirs  = [CONTENT, ".", "..", "./nca_out", "/kaggle/working/nca_out"]
+    dirs  = [CONTENT, ".", "..", "./nca_out", "data"]
     for d in dirs:
         for name in names:
             p = os.path.join(d, name)
@@ -65,7 +70,7 @@ def find_csv(arg):
                 return p
     return None
 
-csv_path = find_csv(args.data)
+csv_path = resolve_data_path(args.data)
 if csv_path is None:
     raise FileNotFoundError(
         "results.csv not found. Upload it to /content/ or pass --data path/to/results.csv"
@@ -75,12 +80,12 @@ df = pd.read_csv(csv_path)
 print(f"Loaded {len(df)} datasets from {csv_path}")
 
 # Assign regimes
-def assign_regime(delta):
+def classify_geometric_regime(delta):
     if delta > 0.10:  return "SC"
     if delta > 0.02:  return "SI"
     return "Entangled"
 
-df["regime"] = df["delta"].apply(assign_regime)
+df["regime"] = df["delta"].apply(classify_geometric_regime)
 df["regime_color"] = df["regime"].map(REGIME_COLORS)
 
 # Keep only non-negative alpha for modelling
@@ -93,7 +98,7 @@ print(f"  SC={len(df_pos[df_pos['regime']=='SC'])}  "
 SAVED = []
 REGIME_ORDER = ["SC", "SI", "Entangled"]
 
-def save(fig, stem):
+def save_figure(fig, stem):
     for ext in ("pdf", "png"):
         p = os.path.join(OUT_DIR, f"{stem}.{ext}")
         fig.savefig(p, dpi=600, bbox_inches="tight", facecolor="white")
@@ -103,7 +108,7 @@ def save(fig, stem):
 
 
 # FIG 1 -- Intrinsic Dimension vs Alpha
-def fig1_dim_vs_alpha():
+def plot_intrinsic_dimension_vs_alpha():
     sub = df_pos[["intrinsic_dim", "alpha", "regime", "regime_color",
                   "dataset"]].dropna()
     rho, pv = stats.spearmanr(sub["intrinsic_dim"], sub["alpha"])
@@ -146,11 +151,11 @@ def fig1_dim_vs_alpha():
     ax.legend(handles=patches, title="Regime", fontsize=10,
               framealpha=0.95, edgecolor="#cccccc")
     fig.tight_layout()
-    save(fig, "fig1_dim_vs_alpha")
+    save_figure(fig, "fig1_dim_vs_alpha")
 
 
 # Delta-metric vs Alpha, coloured by regime
-def fig2_delta_vs_alpha():
+def plot_delta_metric_vs_alpha():
     sub = df_pos[["delta", "alpha", "regime", "dataset"]].dropna()
     rho, pv = stats.spearmanr(sub["delta"], sub["alpha"])
     pstr = f"{pv:.3f}" if pv >= 0.001 else f"{pv:.2e}"
@@ -196,11 +201,11 @@ def fig2_delta_vs_alpha():
                    label=r"$\delta^*$ boundaries")
     ], fontsize=10, framealpha=0.95, edgecolor="#cccccc")
     fig.tight_layout()
-    save(fig, "fig2_delta_vs_alpha")
+    save_figure(fig, "fig2_delta_vs_alpha")
 
 
 # Regime alpha distribution (violin + box + Kruskal-Wallis)
-def fig3_regime_distributions():
+def plot_regime_alpha_distributions():
     from scipy.stats import kruskal
 
     sc  = df_pos[df_pos["regime"] == "SC"]["alpha"].dropna()
@@ -260,11 +265,11 @@ def fig3_regime_distributions():
         fontsize=13, fontweight="bold", pad=12,
     )
     fig.tight_layout()
-    save(fig, "fig3_regime_distributions")
+    save_figure(fig, "fig3_regime_distributions")
 
 
 # Feature importance (RF) + univariate Spearman panel
-def fig4_feature_importance():
+def plot_random_forest_feature_importance():
     # Real importances from RF on this dataset
     # (computed during analysis -- matches run output)
     features_imp = [
@@ -351,11 +356,11 @@ def fig4_feature_importance():
         fontsize=13, fontweight="bold", y=1.02,
     )
     fig.tight_layout()
-    save(fig, "fig4_feature_importance")
+    save_figure(fig, "fig4_feature_importance")
 
 
 # Generate all + ZIP
-def make_zip():
+def package_figures():
     with zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf:
         for p in SAVED:
             zf.write(p, arcname=os.path.relpath(p, CONTENT))
@@ -363,11 +368,11 @@ def make_zip():
 
 if __name__ == "__main__":
     print("\nGenerating main figures (Fig 1-4)...\n")
-    fig1_dim_vs_alpha()
-    fig2_delta_vs_alpha()
-    fig3_regime_distributions()
-    fig4_feature_importance()
-    make_zip()
+    plot_intrinsic_dimension_vs_alpha()
+    plot_delta_metric_vs_alpha()
+    plot_regime_alpha_distributions()
+    plot_random_forest_feature_importance()
+    package_figures()
     print(f"\nDone! Download:")
     print("  from google.colab import files")
     print("  files.download('/content/main_figures.zip')")

@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 """
-For each dataset this script computes:
-  - alpha            : neural scaling exponent via MLP learning curves
-  - fisher_ratio     : between/within class scatter ratio
-  - silhouette       : cluster coherence (shifted to [0,1])
-  - delta            : FR x silhouette (the geometric Delta-metric)
-  - intrinsic_dim    : TwoNN dimensionality estimate
-  - linear_probe_difficulty : logistic regression 5-fold CV log-loss
-  - class_entropy, label_noise, class_imbalance
-  - n_samples, n_features, n_classes
-
+Scaling exponent estimation and geometric feature extraction for tabular
+classification datasets from OpenML. Computes the power-law scaling exponent α,
+the Δ-metric (ΔM = FR × S̃), and associated geometric descriptors.
 """
 
 import os, json, time, warnings
@@ -28,7 +21,7 @@ import openml
 warnings.filterwarnings("ignore")
 
 # -- Output directory -----------------------------------------------------------
-OUT = "/kaggle/working/nca_out" if os.path.exists("/kaggle") else "./nca_out"
+OUT = "./nca_out"
 os.makedirs(OUT, exist_ok=True)
 
 # -- Reproducibility ------------------------------------------------------------
@@ -164,7 +157,7 @@ print(f"Dataset registry: {len(DATASETS)} unique datasets")
 
 
 # PREPROCESSING
-def preprocess(X_raw, y_raw):
+def preprocess_dataset(X_raw, y_raw):
     df = X_raw.copy()
     for col in df.select_dtypes(include=["object", "category"]).columns:
         df[col] = LabelEncoder().fit_transform(df[col].astype(str))
@@ -197,7 +190,7 @@ def preprocess(X_raw, y_raw):
 
 
 # ALPHA ESTIMATION
-def estimate_alpha(X, y):
+def fit_power_law_exponent(X, y):
     n = len(y)
     K = len(np.unique(y))
     if n < 80 or K < 2:
@@ -278,7 +271,7 @@ def estimate_alpha(X, y):
 
 
 # FEATURE FUNCTIONS
-def compute_fisher_ratio(X, y):
+def compute_between_within_scatter_ratio(X, y):
     classes = np.unique(y)
     n, d = X.shape
     grand_mean = X.mean(axis=0)
@@ -299,7 +292,7 @@ def compute_fisher_ratio(X, y):
         return np.nan
 
 
-def compute_silhouette(X, y):
+def compute_shifted_silhouette(X, y):
     n = len(y)
     K = len(np.unique(y))
     if K < 2 or K >= n:
@@ -318,7 +311,7 @@ def compute_silhouette(X, y):
         return np.nan
 
 
-def compute_intrinsic_dim(X):
+def estimate_intrinsic_dimension(X):
     """TwoNN estimator (Facco et al. 2017)."""
     n = X.shape[0]
     if n > 3000:
@@ -339,7 +332,7 @@ def compute_intrinsic_dim(X):
         return float(X.shape[1])
 
 
-def compute_probe_difficulty(X, y):
+def compute_linear_probe_error(X, y):
     K = len(np.unique(y))
     try:
         lr = LogisticRegression(max_iter=400, random_state=MASTER_SEED, C=1.0)
@@ -351,7 +344,7 @@ def compute_probe_difficulty(X, y):
         return np.nan
 
 
-def compute_label_noise(X, y):
+def estimate_label_noise_rate(X, y):
     try:
         k = min(5, len(y) // 10)
         if k < 1:
@@ -365,17 +358,17 @@ def compute_label_noise(X, y):
         return np.nan
 
 
-def extract_all_features(X, y):
+def extract_geometric_features(X, y):
     n, d = X.shape
     K    = len(np.unique(y))
     _, counts = np.unique(y, return_counts=True)
     probs = counts / counts.sum()
 
-    fr   = compute_fisher_ratio(X, y)
-    sil  = compute_silhouette(X, y)
-    dint = compute_intrinsic_dim(X)
-    prob = compute_probe_difficulty(X, y)
-    ln   = compute_label_noise(X, y)
+    fr   = compute_between_within_scatter_ratio(X, y)
+    sil  = compute_shifted_silhouette(X, y)
+    dint = estimate_intrinsic_dimension(X)
+    prob = compute_linear_probe_error(X, y)
+    ln   = estimate_label_noise_rate(X, y)
     ent  = float(-np.sum(probs * np.log(probs + 1e-10)))
     imb  = float(counts.max() / (counts.min() + 1))
     delta = float(fr * sil) if (np.isfinite(fr) and np.isfinite(sil)) else np.nan
@@ -396,7 +389,7 @@ def extract_all_features(X, y):
 
 
 # MAIN LOOP
-def run_experiment():
+def run_scaling_experiment():
     results  = []
     failed   = []
     t_start  = time.time()
@@ -423,7 +416,7 @@ def run_experiment():
             if y_raw is None:
                 raise ValueError("No target column")
 
-            X, y = preprocess(X_raw, y_raw)
+            X, y = preprocess_dataset(X_raw, y_raw)
             if X is None:
                 raise ValueError("Preprocessing failed: fewer than 2 valid classes")
 
@@ -432,14 +425,14 @@ def run_experiment():
             print(f"  preprocessed: n={n}  d={d}  K={K}")
 
             print(f"  computing features...")
-            feats = extract_all_features(X, y)
+            feats = extract_geometric_features(X, y)
             print(f"  FR={feats['fisher_ratio']:.4f}  sil={feats['silhouette']:.4f}"
                   f"  delta={feats['delta']:.4f}  d_int={feats['intrinsic_dim']:.2f}"
                   f"  probe={feats['linear_probe_difficulty']:.4f}")
 
             print(f"  estimating alpha  (N_SEEDS={N_SEEDS})...")
             t_alp = time.time()
-            alpha, r2, ci_lo, ci_hi = estimate_alpha(X, y)
+            alpha, r2, ci_lo, ci_hi = fit_power_law_exponent(X, y)
             print(f"  alpha={alpha:.4f}  R2={r2:.3f}  "
                   f"CI=[{ci_lo:.4f},{ci_hi:.4f}]  ({time.time()-t_alp:.1f}s)")
 
@@ -520,4 +513,4 @@ def run_experiment():
     return df_res, df_fail
 
 
-df_results, df_failed = run_experiment()
+df_results, df_failed = run_scaling_experiment()
