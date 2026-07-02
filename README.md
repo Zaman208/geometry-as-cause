@@ -1,6 +1,6 @@
 # geometry-as-cause: Geometric Learnability Signal for Neural Scaling Laws
 
-**Code and data for the paper *Geometry as Learnability Signal: The Δ-Metric Framework***
+**Predicting Neural Scaling Exponents from Linear Probe Geometry***
 
 **Authors:** Md M. Zaman, A. Zaman, Neha Vinayak, Eht E. Sham — BITS Pilani, India
 
