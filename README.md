@@ -3,7 +3,7 @@
 
 **Authors:** Md M. Zaman, A. Zaman, Neha Vinayak, Eht E. Sham — BITS Pilani, India
 
-**Submitted to:** Transactions on Machine Learning Research (TMLR)
+**To be Submitted to:** Transactions on Machine Learning Research (TMLR)
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
